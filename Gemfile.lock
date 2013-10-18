@@ -1,5 +1,5 @@
 GIT
-  remote: http://github.com/ooyala/grit.git
+  remote: https://github.com/ooyala/grit.git
   revision: 38d0e6660b78bff97499280fae09a78b087c50b4
   ref: 38d0e6660b78bff97499280fae09a78b087c50b4
   specs:
