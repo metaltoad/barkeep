@@ -1,0 +1,405 @@
+From e0f2ba32d3f13bda04fdd0135066b50d37275aee Mon Sep 17 00:00:00 2001
+From: Jan Berdajs <mrbrdo@gmail.com>
+Date: Wed, 26 Jun 2013 21:12:48 +0200
+Subject: [PATCH 1/2] fix migrations and tweak things to remove hard dependency
+ on mysql
+
+---
+ barkeep_server.rb                                          |  4 ++--
+ lib/stats.rb                                               | 14 +++++++-------
+ migrations/20110723164631_initial.rb                       |  2 +-
+ migrations/20110730115408_add_saved_searches_table.rb      |  2 +-
+ migrations/20110730130858_create_a_default_user.rb         |  4 ++--
+ migrations/20110802230834_add_comments_table.rb            |  4 ++--
+ migrations/20110804170453_add_user_order_index_to_user.rb  |  6 +++---
+ migrations/20110818235437_add_email_tasks_table.rb         |  4 ++--
+ .../20110902095111_add_commit_id_column_to_email_tasks.rb  |  2 +-
+ ...002055_add_has_been_emailed_column_to_comments_table.rb |  2 +-
+ migrations/20111001155432_add_integration_test_user.rb     |  4 ++--
+ .../20120128151243_remove_commit_user_association.rb       |  2 --
+ migrations/20120324162814_delete_old_demo_user.rb          |  2 +-
+ .../20120428064732_add_user_api_key_and_api_secret.rb      |  4 ++--
+ ...0130213170042_add_deleted_user_for_integration_tests.rb |  4 ++--
+ models/saved_search.rb                                     |  2 +-
+ models/user.rb                                             |  2 +-
+ 17 files changed, 31 insertions(+), 33 deletions(-)
+
+diff --git a/barkeep_server.rb b/barkeep_server.rb
+index 29bb98a..8315fab 100644
+--- a/barkeep_server.rb
++++ b/barkeep_server.rb
+@@ -506,8 +506,8 @@ def ensure_required_params(*required_params)
+   #
+ 
+   get "/autocomplete/authors" do
+-    users = User.filter("`email` LIKE ?", "%#{params[:substring]}%").
+-        or("`name` LIKE ?", "%#{params[:substring]}%").distinct(:email).limit(10)
++    users = User.filter("email LIKE ?", "%#{params[:substring]}%").
++        or("name LIKE ?", "%#{params[:substring]}%").distinct(:email).limit(10)
+     { :values => users.map { |user| "#{user.name} <#{user.email}>" } }.to_json
+   end
+ 
+diff --git a/lib/stats.rb b/lib/stats.rb
+index 925229a..d61062d 100644
+--- a/lib/stats.rb
++++ b/lib/stats.rb
+@@ -13,23 +13,23 @@ def self.num_commits(since)
+   end
+ 
+   def self.num_unreviewed_commits(since)
+-    Commit.filter("`commits`.`date` > ?", since).
++    Commit.filter("commits.date > ?", since).
+         left_join(:comments, :commit_id => :commits__id).filter(:comments__id => nil).count
+   end
+ 
+   def self.num_reviewed_without_lgtm_commits(since)
+-    Commit.filter("`commits`.`date` > ?", since).filter(:approved_by_user_id => nil).
+-        left_join(:comments, :commit_id => :commits__id).filter("`comments`.`id` IS NOT NULL").count
++    Commit.filter("commits.date > ?", since).filter(:approved_by_user_id => nil).
++        left_join(:comments, :commit_id => :commits__id).filter("comments.id IS NOT NULL").count
+   end
+ 
+   def self.num_lgtm_commits(since)
+-    Commit.filter("`commits`.`date` > ?", since).filter("approved_by_user_id IS NOT NULL").count
++    Commit.filter("commits.date > ?", since).filter("approved_by_user_id IS NOT NULL").count
+   end
+ 
+   def self.chatty_commits(since)
+     dataset = Commit.
+         join(:comments, :commit_id => :id).
+-        filter("`comments`.`created_at` > ?", since).
++        filter("comments.created_at > ?", since).
+         join(:git_repos, :id => :commits__git_repo_id).
+         group_and_count(:commits__sha, :git_repos__name___repo).order(:count.desc).limit(10)
+     commits_sha_repo_count = dataset.all
+@@ -43,7 +43,7 @@ def self.chatty_commits(since)
+ 
+   def self.top_reviewers(since)
+     user_ids_and_counts = User.join(:comments, :user_id => :id).
+-        filter("`comments`.`created_at` > ?", since).
++        filter("comments.created_at > ?", since).
+         group_and_count(:users__id).order(:count.desc).limit(10).all
+     user_ids_and_counts.map do |id_and_count|
+       [User[id_and_count[:id]], id_and_count[:count]]
+@@ -52,7 +52,7 @@ def self.top_reviewers(since)
+ 
+   def self.top_approvers(since)
+     user_ids_and_counts = User.join(:commits, :approved_by_user_id => :id).
+-      filter("`commits`.`approved_at` > ?", since).
++      filter("commits.approved_at > ?", since).
+       group_and_count(:users__id).order(:count.desc).limit(10).all
+     user_ids_and_counts.map do |id_and_count|
+       [User[id_and_count[:id]], id_and_count[:count]]
+diff --git a/migrations/20110723164631_initial.rb b/migrations/20110723164631_initial.rb
+index 59f6307..22df5a7 100644
+--- a/migrations/20110723164631_initial.rb
++++ b/migrations/20110723164631_initial.rb
+@@ -19,7 +19,7 @@
+       unique [:git_repo_id, :sha], :name => "sha_is_unique_per_repo"
+       text :message
+       foreign_key :user_id, :users, :key => :id
+-      datetime :date
++      DateTime :date
+       boolean :approved, :default => false
+     end
+     create_table(:commit_files) do
+diff --git a/migrations/20110730115408_add_saved_searches_table.rb b/migrations/20110730115408_add_saved_searches_table.rb
+index 7a41da8..f364787 100644
+--- a/migrations/20110730115408_add_saved_searches_table.rb
++++ b/migrations/20110730115408_add_saved_searches_table.rb
+@@ -4,7 +4,7 @@
+   up do
+     create_table(:saved_searches) do
+       primary_key :id
+-      datetime :created_at
++      DateTime :created_at
+       boolean :email_changes, :default => false
+     end
+ 
+diff --git a/migrations/20110730130858_create_a_default_user.rb b/migrations/20110730130858_create_a_default_user.rb
+index b3d71ca..848da53 100644
+--- a/migrations/20110730130858_create_a_default_user.rb
++++ b/migrations/20110730130858_create_a_default_user.rb
+@@ -3,10 +3,10 @@
+ # Creating a default user so we can assume there's a user logged in, for now.
+ Sequel.migration do
+   up do
+-    DB[:users].insert(:name => "demo", :email => "demo@demo.com")
++    self[:users].insert(:name => "demo", :email => "demo@demo.com")
+   end
+ 
+   down do
+-    DB[:users].filter(:email => "demo@demo.com").delete
++    self[:users].filter(:email => "demo@demo.com").delete
+   end
+ end
+diff --git a/migrations/20110802230834_add_comments_table.rb b/migrations/20110802230834_add_comments_table.rb
+index de9fd89..716e2bc 100644
+--- a/migrations/20110802230834_add_comments_table.rb
++++ b/migrations/20110802230834_add_comments_table.rb
+@@ -10,8 +10,8 @@
+       text :text
+       int :line_number
+       String :file_version
+-      datetime :created_at
+-      datetime :updated_at
++      DateTime :created_at
++      DateTime :updated_at
+     end
+   end
+ 
+diff --git a/migrations/20110804170453_add_user_order_index_to_user.rb b/migrations/20110804170453_add_user_order_index_to_user.rb
+index 33f0a73..80e6c44 100644
+--- a/migrations/20110804170453_add_user_order_index_to_user.rb
++++ b/migrations/20110804170453_add_user_order_index_to_user.rb
+@@ -7,9 +7,9 @@
+     end
+ 
+     # Keep the current ordering (created_at)
+-    DB[:users].each do |user|
+-      DB[:saved_searches].filter(:user_id => user[:id]).order(:created_at).each_with_index do |search, i|
+-        DB[:saved_searches].filter(:id => search[:id]).update(:user_order => i)
++    self[:users].each do |user|
++      self[:saved_searches].filter(:user_id => user[:id]).order(:created_at).each_with_index do |search, i|
++        self[:saved_searches].filter(:id => search[:id]).update(:user_order => i)
+       end
+     end
+ 
+diff --git a/migrations/20110818235437_add_email_tasks_table.rb b/migrations/20110818235437_add_email_tasks_table.rb
+index 31154ab..e3e8bf3 100644
+--- a/migrations/20110818235437_add_email_tasks_table.rb
++++ b/migrations/20110818235437_add_email_tasks_table.rb
+@@ -4,8 +4,8 @@
+   up do
+     create_table(:email_tasks) do
+       primary_key :id
+-      datetime :created_at
+-      datetime :last_attempted
++      DateTime :created_at
++      DateTime :last_attempted
+ 
+       String :to, :size => 256
+       String :subject, :size => 256
+diff --git a/migrations/20110902095111_add_commit_id_column_to_email_tasks.rb b/migrations/20110902095111_add_commit_id_column_to_email_tasks.rb
+index d4a2580..a147c1b 100644
+--- a/migrations/20110902095111_add_commit_id_column_to_email_tasks.rb
++++ b/migrations/20110902095111_add_commit_id_column_to_email_tasks.rb
+@@ -4,6 +4,6 @@
+   change do
+     add_column :email_tasks, :commit_id, Integer
+     # Delete any outstanding EmailTasks in your database. They're no good without a commit_id.
+-    DB[:email_tasks].delete
++    self[:email_tasks].delete
+   end
+ end
+diff --git a/migrations/20110905002055_add_has_been_emailed_column_to_comments_table.rb b/migrations/20110905002055_add_has_been_emailed_column_to_comments_table.rb
+index 519a06d..4fe4f9b 100644
+--- a/migrations/20110905002055_add_has_been_emailed_column_to_comments_table.rb
++++ b/migrations/20110905002055_add_has_been_emailed_column_to_comments_table.rb
+@@ -2,7 +2,7 @@
+ 
+ Sequel.migration do
+   change do
+-    add_column :comments, :has_been_emailed, TrueClass, :default => 0
++    add_column :comments, :has_been_emailed, TrueClass, :default => false
+     add_index :comments, [:has_been_emailed, :created_at]
+   end
+ end
+diff --git a/migrations/20111001155432_add_integration_test_user.rb b/migrations/20111001155432_add_integration_test_user.rb
+index a87a929..8c1cc55 100644
+--- a/migrations/20111001155432_add_integration_test_user.rb
++++ b/migrations/20111001155432_add_integration_test_user.rb
+@@ -3,11 +3,11 @@
+ 
+ Sequel.migration do
+   up do
+-    DB[:users].insert(:name => "Integration test", :email => "integration_test@example.com",
++    self[:users].insert(:name => "Integration test", :email => "integration_test@example.com",
+         :stats_time_range => "month", :saved_search_time_period => 7)
+   end
+ 
+   down do
+-    DB[:users].filter(:email => "integration_test@example.com").delete
++    self[:users].filter(:email => "integration_test@example.com").delete
+   end
+ end
+diff --git a/migrations/20120128151243_remove_commit_user_association.rb b/migrations/20120128151243_remove_commit_user_association.rb
+index 1bac5a7..2e0e7b5 100644
+--- a/migrations/20120128151243_remove_commit_user_association.rb
++++ b/migrations/20120128151243_remove_commit_user_association.rb
+@@ -2,8 +2,6 @@
+ 
+ Sequel.migration do
+   up do
+-    # Sequel has no database-independent way of dropping a foreign key constraint.
+-    run "ALTER TABLE `commits` DROP FOREIGN KEY `commits_ibfk_2`"
+     alter_table(:commits) do
+       drop_column :user_id
+     end
+diff --git a/migrations/20120324162814_delete_old_demo_user.rb b/migrations/20120324162814_delete_old_demo_user.rb
+index 724b251..81205e9 100644
+--- a/migrations/20120324162814_delete_old_demo_user.rb
++++ b/migrations/20120324162814_delete_old_demo_user.rb
+@@ -6,6 +6,6 @@
+   up do
+     # We created this user in the migration "20110730130858_create_a_default_user.rb". We no longer need it
+     # now that we have real user accounts and proper login support.
+-    DB[:users].filter(:email => "demo@demo.com").delete
++    self[:users].filter(:email => "demo@demo.com").delete
+   end
+ end
+diff --git a/migrations/20120428064732_add_user_api_key_and_api_secret.rb b/migrations/20120428064732_add_user_api_key_and_api_secret.rb
+index 518368c..23a8ed3 100644
+--- a/migrations/20120428064732_add_user_api_key_and_api_secret.rb
++++ b/migrations/20120428064732_add_user_api_key_and_api_secret.rb
+@@ -10,8 +10,8 @@
+       add_column :api_secret, String, :default => "", :null => false
+     end
+     # Assign a key and secret to all existing users.
+-    DB[:users].all do |user|
+-      DB[:users][:id => user[:id]] = {
++    self[:users].all do |user|
++      self[:users][:id => user[:id]] = {
+         :api_key => Api.generate_user_key,
+         :api_secret => Api.generate_user_key
+       }
+diff --git a/migrations/20130213170042_add_deleted_user_for_integration_tests.rb b/migrations/20130213170042_add_deleted_user_for_integration_tests.rb
+index 64f9bfe..c7ab4cb 100644
+--- a/migrations/20130213170042_add_deleted_user_for_integration_tests.rb
++++ b/migrations/20130213170042_add_deleted_user_for_integration_tests.rb
+@@ -5,11 +5,11 @@
+ 
+ Sequel.migration do
+   up do
+-    DB[:users].insert(:name => "Deleted user", :email => "deleted_for_tests@example.com",
++    self[:users].insert(:name => "Deleted user", :email => "deleted_for_tests@example.com",
+                       :deleted_at => Time.parse("2013-01-02"))
+   end
+ 
+   down do
+-    DB[:users].filter(:email => "deleted_for_tests@example.com").delete
++    self[:users].filter(:email => "deleted_for_tests@example.com").delete
+   end
+ end
+diff --git a/models/saved_search.rb b/models/saved_search.rb
+index a3cc2c5..3794926 100644
+--- a/models/saved_search.rb
++++ b/models/saved_search.rb
+@@ -120,7 +120,7 @@ def comma_separated_list(list)
+   def map_authors_names(authors_list)
+     authors_list.map do |author|
+       if author =~ /^<.*>$/
+-        users = User.filter("`email`=?", author.gsub(/^<|>$/,"")).limit(10).all
++        users = User.filter("email=?", author.gsub(/^<|>$/,"")).limit(10).all
+         next users[0].name if users.length > 0
+       end
+       author
+diff --git a/models/user.rb b/models/user.rb
+index 82c2b0b..19027b7 100644
+--- a/models/user.rb
++++ b/models/user.rb
+@@ -10,7 +10,7 @@
+ # A logged-in user, or the demo user.
+ # For demo users, we store their saved searches in their cookie instead of the database.
+ class User < Sequel::Model
+-  one_to_many :saved_searches, :order => [:user_order.desc]
++  one_to_many :saved_searches, :order => [Sequel.desc(:user_order)]
+   one_to_many :comments
+   one_to_many :authors
+   add_association_dependencies :authors => :destroy
+
+From 6a49d9b322b5432d8d0706418d49267bac42c502 Mon Sep 17 00:00:00 2001
+From: Jan Berdajs <mrbrdo@gmail.com>
+Date: Wed, 26 Jun 2013 21:51:57 +0200
+Subject: [PATCH 2/2] fix more deprecated methods from Sequel
+
+---
+ barkeep_server.rb   |  4 ++--
+ lib/admin_routes.rb | 10 +++++-----
+ lib/stats.rb        |  6 +++---
+ 3 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/barkeep_server.rb b/barkeep_server.rb
+index 8315fab..500c943 100644
+--- a/barkeep_server.rb
++++ b/barkeep_server.rb
+@@ -538,7 +538,7 @@ def ensure_required_params(*required_params)
+   # For testing and styling emails.
+   # - send_email: set to true to actually send the email for this comment.
+   get "/dev/latest_comment_email_preview" do
+-    comment = Comment.order(:id.desc).first
++    comment = Comment.order(Sequel.desc(:id)).first
+     next "No comments have been created yet." unless comment
+     Emails.send_comment_email(comment.commit, [comment]) if params[:send_email] == "true"
+     Emails.comment_email_body(comment.commit, [comment])
+@@ -548,7 +548,7 @@ def ensure_required_params(*required_params)
+   # - send_email: set to true to actually send the email for this commit.
+   # - commit: the sha of the commit you want to preview.
+   get "/dev/latest_commit_email_preview" do
+-    commit = params[:commit] ? Commit.first(:sha => params[:commit]) : Commit.order(:id.desc).first
++    commit = params[:commit] ? Commit.first(:sha => params[:commit]) : Commit.order(Sequel.desc(:id)).first
+     next "No commits have been created yet." unless commit
+     Emails.send_commit_email(commit) if params[:send_email] == "true"
+     Emails.commit_email_body(commit)
+diff --git a/lib/admin_routes.rb b/lib/admin_routes.rb
+index a4339bd..cc832f9 100644
+--- a/lib/admin_routes.rb
++++ b/lib/admin_routes.rb
+@@ -26,13 +26,13 @@ class BarkeepServer < Sinatra::Base
+ 
+   get "/admin/diagnostics?" do
+     admin_erb :diagnostics, :locals => {
+-      :most_recent_commit => Commit.order(:id.desc).first,
+-      :most_recent_comment => Comment.order(:id.desc).first,
++      :most_recent_commit => Commit.order(Sequel.desc(:id)).first,
++      :most_recent_comment => Comment.order(Sequel.desc(:id)).first,
+       :repos => MetaRepo.instance.repos.map(&:name),
+       :failed_email_count => CompletedEmail.filter(:result => "failure").count,
+       :recently_failed_emails =>
+-          CompletedEmail.filter(:result => "failure").order(:created_at.desc).limit(10).all,
+-      :pending_comments => Comment.filter(:has_been_emailed => false).order(:id.asc).limit(10).all,
++          CompletedEmail.filter(:result => "failure").order(Sequel.desc(:created_at)).limit(10).all,
++      :pending_comments => Comment.filter(:has_been_emailed => false).order(Sequel.asc(:id)).limit(10).all,
+       :pending_comments_count => Comment.filter(:has_been_emailed => false).count,
+     }
+   end
+@@ -78,7 +78,7 @@ class BarkeepServer < Sinatra::Base
+         :name => git_repo.name,
+         :exists_on_disk => !!grit_repo,
+         :origin_url => origin,
+-        :newest_commit => git_repo.commits_dataset.order(:date.desc).first
++        :newest_commit => git_repo.commits_dataset.order(Sequel.desc(:date)).first
+       }
+     end
+ 
+diff --git a/lib/stats.rb b/lib/stats.rb
+index d61062d..762cd2e 100644
+--- a/lib/stats.rb
++++ b/lib/stats.rb
+@@ -31,7 +31,7 @@ def self.chatty_commits(since)
+         join(:comments, :commit_id => :id).
+         filter("comments.created_at > ?", since).
+         join(:git_repos, :id => :commits__git_repo_id).
+-        group_and_count(:commits__sha, :git_repos__name___repo).order(:count.desc).limit(10)
++        group_and_count(:commits__sha, :git_repos__name___repo).order(Sequel.desc(:count)).limit(10)
+     commits_sha_repo_count = dataset.all
+     commits_and_counts = commits_sha_repo_count.map do |sha_repo_count|
+       grit_commit = MetaRepo.instance.grit_commit(sha_repo_count[:repo], sha_repo_count[:sha])
+@@ -44,7 +44,7 @@ def self.chatty_commits(since)
+   def self.top_reviewers(since)
+     user_ids_and_counts = User.join(:comments, :user_id => :id).
+         filter("comments.created_at > ?", since).
+-        group_and_count(:users__id).order(:count.desc).limit(10).all
++        group_and_count(:users__id).order(Sequel.desc(:count)).limit(10).all
+     user_ids_and_counts.map do |id_and_count|
+       [User[id_and_count[:id]], id_and_count[:count]]
+     end
+@@ -53,7 +53,7 @@ def self.top_reviewers(since)
+   def self.top_approvers(since)
+     user_ids_and_counts = User.join(:commits, :approved_by_user_id => :id).
+       filter("commits.approved_at > ?", since).
+-      group_and_count(:users__id).order(:count.desc).limit(10).all
++      group_and_count(:users__id).order(Sequel.desc(:count)).limit(10).all
+     user_ids_and_counts.map do |id_and_count|
+       [User[id_and_count[:id]], id_and_count[:count]]
+     end
