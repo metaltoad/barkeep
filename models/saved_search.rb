@@ -26,13 +26,13 @@ class SavedSearch < Sequel::Model
   end
 
   # The total number of approved & unapproved in a search
-  def num_commits(token = nil, direction = "before", min_commit_date, unapproved)
+  def num_commits(direction = "before", min_commit_date, unapproved)
     result = MetaRepo.instance.find_commit_count(
       :repos => repos_list,
       :branches => branches_list,
       :authors => authors_list,
       :paths => paths_list,
-      :token => token,
+      :token => nil,
       :direction => direction,
       :commit_filter_proc => unapproved ?
           self.method(:select_unapproved_commits).to_proc :
@@ -41,12 +41,12 @@ class SavedSearch < Sequel::Model
     result
   end
 
-  def total_commit_count(token = nil, direction = "before", min_commit_date)
-    num_commits(token, direction, min_commit_date, false)
+  def total_commit_count(direction = "before", min_commit_date)
+    num_commits(direction, min_commit_date, false)
   end
 
-  def unapproved_commit_count(token = nil, direction = "before", min_commit_date)
-    num_commits(token, direction, min_commit_date, true)
+  def unapproved_commit_count(direction = "before", min_commit_date)
+    num_commits(direction, min_commit_date, true)
   end
 
 

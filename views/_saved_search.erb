@@ -9,8 +9,8 @@
 <%
   min_commit_date = Time.now - 60 * 60 * 24 * current_user.saved_search_time_period
   commits, tokens = saved_search.commits(token, direction, min_commit_date)
-  total = saved_search.total_commit_count(token, direction, min_commit_date).to_i
-  unapproved = saved_search.unapproved_commit_count(token, direction, min_commit_date).to_i
+  total = saved_search.total_commit_count(direction, min_commit_date).to_i
+  unapproved = saved_search.unapproved_commit_count(direction, min_commit_date).to_i
   approved = total - unapproved
   from = tokens[:from]
   to = tokens[:to]
