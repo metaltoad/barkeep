@@ -139,6 +139,30 @@ class MetaRepo
     result
   end
 
+  def find_commit_count(search_options)
+
+    #
+    # Assuming everything has been set up correctly in preparation to invoke git rev-list, add in options for
+    # the limit and timestamp.
+    token = search_options[:token].then { |token_string| PagingToken.from_s(token_string) }
+    search_options[:limit] = 0
+    commits = (search_options[:direction] == "before") ?
+      find_commits_before(search_options, token, token.nil?) :
+      find_commits_after(search_options, token, false, true)
+
+    if commits.empty?
+      return 0
+    end
+    return commits.count
+
+    tokens = {}
+    [[:from, commits.last], [:to, commits.first]].each do |token_name, commit|
+      tokens[token_name] = PagingToken.new(commit.timestamp, commit.repo_name, commit.sha)
+    end
+    result = count_commits_to_token(search_options, tokens[:to])
+    result
+  end
+
   # Find commits before a certain date. This is used when going forward through pages (1 -> 2) of commits.
   def find_commits_before(search_options, token, inclusive)
     repos = search_options[:repos].blank? ? @repos : repos_which_match(search_options[:repos])
@@ -146,6 +170,10 @@ class MetaRepo
     extra_options = token ? { :before => token.timestamp } : {}
     results = commits_from_repos(repos, MetaRepo.git_command_options(search_options).merge(extra_options),
         limit, :first, search_options[:commit_filter_proc])
+
+    if limit == 0
+      return results
+    end
 
     token_index = token.nil? ? 0 : results.index do |commit|
       [:timestamp, :repo_name, :sha].all? { |p| commit.send(p) == token.send(p) }
@@ -221,6 +249,9 @@ class MetaRepo
       end
     end
 
+    if limit == 0
+      return commits
+    end
     # Hokay, now let's add in all the boundary commits (if necessary)
     boundary_commits = []
     if original_timestamp
@@ -259,21 +290,29 @@ class MetaRepo
     # the first list of commits we got from git rev-list were not all approved by the filter_proc.
     # We'll ask for more than we need if there's a filter_proc, so that we'll hopefully reduce how many
     # invocations we'll need to make to git rev-list.
+
+    if limit == 0
+      fake_limit = 0
+    else
+      fake_limit = commit_filter_proc ? limit * 2 : limit
+      fake_limit += 1
+    end
     limit_with_padding = commit_filter_proc ? limit * 2 : limit
     begin
-      original_results = GitHelper.commits_with_limit(repo, git_command_options, limit_with_padding + 1,
+      original_results = GitHelper.commits_with_limit(repo, git_command_options, fake_limit,
           :commits, retain)
       has_more = (original_results.size > limit_with_padding)
       # Commits are ordered by git ordering, so grab the first limit_with_padding amount when paging to
       # older commits and the last limit_with_padding amount when paging to newer commits.
+      if limit != 0
       original_results = (retain == :first) ?
           original_results.take(limit_with_padding) :
           original_results.last(limit_with_padding)
+      end
       filtered_results += commit_filter_proc ?
           commit_filter_proc.call(original_results) :
           original_results
-
-      if has_more
+      if has_more && limit > 0
         if retain == :first
           oldest_commit = original_results.last
           git_command_options[:before] = oldest_commit.timestamp - 1
@@ -285,6 +324,9 @@ class MetaRepo
       current_page_attempt += 1
     end while (has_more && filtered_results.size < limit && current_page_attempt < max_git_pages_to_search)
 
+    if limit == 0
+      return filtered_results
+    end
     if retain == :last
       # We want the end of this list of commits in the case where we're paging to the left (backwards) through
       # commits.

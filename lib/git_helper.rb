@@ -16,11 +16,18 @@ class GitHelper
     end
 
     if retain == :first || mode == :count
-      return self.rev_list(repo, git_command_options.merge({ :max_count => limit}), mode)
+      if limit <= 0
+        return self.rev_list(repo, git_command_options.merge({}), mode)
+      else
+        return self.rev_list(repo, git_command_options.merge({ :max_count => limit}), mode)
+      end
     else
       # Now the tricky part
       # TODO(caleb) Make this marginally smart (not sure how to do this efficiently).
-      extra_options = { :max_count => 10_000 }
+      extra_options = {}
+      if limit > 0
+        extra_options = { :max_count => 10_000 }
+      end
       self.rev_list(repo, git_command_options.merge(extra_options), mode).last(limit)
     end
   end

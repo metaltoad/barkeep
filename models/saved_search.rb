@@ -25,6 +25,31 @@ class SavedSearch < Sequel::Model
     [result[:commits], result[:tokens]]
   end
 
+  # The total number of approved & unapproved in a search
+  def num_commits(token = nil, direction = "before", min_commit_date, unapproved)
+    result = MetaRepo.instance.find_commit_count(
+      :repos => repos_list,
+      :branches => branches_list,
+      :authors => authors_list,
+      :paths => paths_list,
+      :token => token,
+      :direction => direction,
+      :commit_filter_proc => unapproved ?
+          self.method(:select_unapproved_commits).to_proc :
+          self.method(:select_commits_currently_in_db).to_proc,
+      :after => min_commit_date)
+    result
+  end
+
+  def total_commit_count(token = nil, direction = "before", min_commit_date)
+    num_commits(token, direction, min_commit_date, false)
+  end
+
+  def unapproved_commit_count(token = nil, direction = "before", min_commit_date)
+    num_commits(token, direction, min_commit_date, true)
+  end
+
+
   # True if this saved search's results include this commit.
   # NOTE(philc): This ignores the "unapproved_only" option of saved searches, because it's currently
   # being used to compute who to send comment emails to, and those computations should not care if a commit

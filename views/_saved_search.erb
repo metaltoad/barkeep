@@ -9,6 +9,9 @@
 <%
   min_commit_date = Time.now - 60 * 60 * 24 * current_user.saved_search_time_period
   commits, tokens = saved_search.commits(token, direction, min_commit_date)
+  total = saved_search.total_commit_count(token, direction, min_commit_date).to_i
+  unapproved = saved_search.unapproved_commit_count(token, direction, min_commit_date).to_i
+  approved = total - unapproved
   from = tokens[:from]
   to = tokens[:to]
 %>
@@ -46,6 +49,7 @@
       </div>
     </div>
     <div class="name"><%= CGI.escapeHTML(saved_search.title) %></div>
+    <span class="approved"><%= approved %></span> approved of <span class="total"><%= total %></span> commits
   </div>
   <% if commits.empty? %>
     <div class="noResults">No search results.</div>
