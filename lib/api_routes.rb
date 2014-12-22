@@ -59,6 +59,23 @@ class BarkeepServer < Sinatra::Base
     format_commit_data(commit, params[:repo_name], fields).to_json
   end
 
+  get "/api/searches/stats" do
+    # Return the current users' searches with stats on them
+    searches = self.current_user.saved_searches()
+    data = {}
+    direction = "before"
+    min_commit_date = params[:min_commit_date] ? params[:min_commit_date] : Time.now - 60 * 60 * 24 * self.current_user.saved_search_time_period
+    searches.each do |search|
+      s_data = {}
+      s_data['title'] = search.title
+      s_data['total_commits'] = search.total_commit_count(direction, min_commit_date)
+      s_data['unapproved_comments'] = search.unapproved_commit_count(direction, min_commit_date)
+      s_data['approved_comments'] = s_data['total_commits'] - s_data['unapproved_comments']
+      data[search.id] = s_data
+    end
+    data.to_json
+  end
+
   # NOTE(caleb): Large GET requests are rejected by the Ruby web servers we use. (Unicorn, in particular,
   # doesn't seem to like paths > 1k and rejects them silently.) Hence, to batch-request commit data, we must
   # use a POST.
